@@ -10,22 +10,25 @@ namespace Octree
 		public static OctreeCell Root;
 
 		public OctreeCell Parent;
-		public List<OctreePoint> ContainedItems = new List<OctreePoint>();
+		public List<OctreePoint> ContainedPoints = new List<OctreePoint>();
 		public OctreeCell[] ChildCells => m_childCells;
 		private OctreeCell[] m_childCells = new OctreeCell[8];
 
 		private Vector3 m_position;
 		private Bounds m_bounds;
 		private float m_halfDimension;
+		private int m_subdivisions;
 
 		public OctreeCell(OctreeCell parent,
 						  Vector3 childPos,
 						  float halfDimension,
-						  List<OctreePoint> potentialItems)
+						  List<OctreePoint> potentialItems,
+						  int subdivisions)
 		{
 			Parent = parent;
 			m_position = childPos;
 			m_halfDimension = halfDimension;
+			m_subdivisions = subdivisions;
 
 			m_bounds = new Bounds(m_position, Vector3.one * halfDimension * 2f);
 
@@ -39,19 +42,19 @@ namespace Octree
 		{
 			if (ContainsPoint(point.transform.position))
 			{
+				//while this cell has no child cells, push the point to this cell
+				//subdivide this cell if it contains to many points
 				if (m_childCells[0] == null)
 				{
 					PushItem(point);
+					SubdivideIfNecessary();
+					return true;
 				}
-				else
+				
+				//process points on child cells
+				foreach (var childNode in m_childCells)
 				{
-					foreach (var childNode in m_childCells)
-					{
-						if (childNode.ProcessPoint(point))
-						{
-							return true;
-						}
-					}
+					if (childNode.ProcessPoint(point)) return true;
 				}
 			}
 
@@ -60,23 +63,29 @@ namespace Octree
 
 		private void PushItem(OctreePoint point)
 		{
-			if (!ContainedItems.Contains(point))
+			if (!ContainedPoints.Contains(point))
 			{
-				ContainedItems.Add(point);
+				ContainedPoints.Add(point);
 				point.Cells.Add(this);
-			}
-
-			if (ContainedItems.Count > MaxPoints)
-			{
-				Split();
 			}
 		}
 
-		private void Split()
+		private void SubdivideIfNecessary()
 		{
-			foreach (var containedItem in ContainedItems)
+			if (ContainedPoints.Count > MaxPoints)
 			{
-				containedItem.Cells.Remove(this);
+				Subdivide();
+			}
+		}
+
+		private void Subdivide()
+		{
+			if (m_subdivisions == 0) return;
+			//remove this cell from all contained point
+			//because it will be subdivided
+			foreach (var octreePoint in ContainedPoints)
+			{
+				octreePoint.Cells.Remove(this);
 			}
 
 			//create upper cells
@@ -85,7 +94,8 @@ namespace Octree
 			{
 				var childPosition = m_position + extents;
 				m_childCells[i] =
-					new OctreeCell(this, childPosition, m_halfDimension / 2, ContainedItems);
+					new OctreeCell(this, childPosition, m_halfDimension / 2, ContainedPoints,
+								   m_subdivisions - 1);
 				extents = Quaternion.Euler(0f, -90f, 0f) * extents;
 			}
 
@@ -97,11 +107,12 @@ namespace Octree
 			{
 				var childPosition = m_position + extents;
 				m_childCells[i] =
-					new OctreeCell(this, childPosition, m_halfDimension / 2, ContainedItems);
+					new OctreeCell(this, childPosition, m_halfDimension / 2, ContainedPoints,
+								   m_subdivisions - 1);
 				extents = Quaternion.Euler(0f, -90f, 0f) * extents;
 			}
 
-			ContainedItems.Clear();
+			ContainedPoints.Clear();
 		}
 
 		public bool ContainsPoint(Vector3 position)
@@ -118,22 +129,21 @@ namespace Octree
 			return true;
 		}
 
-		public void TryReduceSubdivision(OctreePoint point)
+		public void TryReduceSubdivisions(OctreePoint point)
 		{
 			if (this != Root && !SiblingNodesContainsToManyPoints())
 			{
 				foreach (var cell in Parent.m_childCells)
 				{
-					cell.Delete(Parent.ChildCells.Where(x => !ReferenceEquals(x, this)).ToArray());
+					//trying to avoid null cell, might be already deleted
+					cell?.Delete(Parent.ChildCells.Where(x => !ReferenceEquals(x, this)).ToArray());
 				}
 
 				Parent.ClearChildCells();
 			}
-			else
-			{
-				ContainedItems.Remove(point);
-				point.Cells.Remove(this);
-			}
+
+			ContainedPoints.Remove(point);
+			point.Cells.Remove(this);
 		}
 
 		private bool SiblingNodesContainsToManyPoints()
@@ -142,24 +152,26 @@ namespace Octree
 
 			foreach (var sibling in Parent.ChildCells)
 			{
+				//skip sibling if null, its maybe already deleted
+				if (sibling == null) continue;
 				if (sibling.ChildCells[0] != null) return true;
 
-				containingItems.AddRange(sibling.ContainedItems.Where(x => !containingItems
-																		  .Contains(x)));
+				containingItems.AddRange(sibling.ContainedPoints
+												.Where(x => !containingItems.Contains(x)));
 			}
 
 			return containingItems.Count > MaxPoints + 1;
 		}
 
-		private void Delete(OctreeCell[] obsoleteCell)
+		private void Delete(OctreeCell[] obsoleteCells)
 		{
-			foreach (var item in ContainedItems)
+			foreach (var item in ContainedPoints)
 			{
-				item.Cells = item.Cells.Except(obsoleteCell).ToList();
+				item.Cells = item.Cells.Except(obsoleteCells).ToList();
 				item.Cells.Remove(this);
 
 				item.Cells.Add(Parent);
-				Parent.ContainedItems.Add(item);
+				Parent.ContainedPoints.Add(item);
 			}
 		}
 

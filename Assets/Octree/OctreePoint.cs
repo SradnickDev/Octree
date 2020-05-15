@@ -53,10 +53,10 @@ namespace Octree
 			}
 
 			Cells = validCells;
-
-			foreach (var obsoleteNode in obsoleteCells)
+			
+			foreach (var cell in obsoleteCells)
 			{
-				obsoleteNode.TryReduceSubdivision(this);
+				cell.TryReduceSubdivisions(this);
 			}
 		}
 
